@@ -35,7 +35,7 @@ class NormLinear(Module):
         self,
         dim,
         dim_out,
-        norm_dim = -1
+        norm_dim_in = True
     ):
         super().__init__()
         self.linear = nn.Linear(dim, dim_out, bias = False)
@@ -43,7 +43,7 @@ class NormLinear(Module):
         parametrize.register_parametrization(
             self.linear,
             'weight',
-            L2Norm(dim = norm_dim)
+            L2Norm(dim = -1 if norm_dim_in else 0)
         )
 
     @property
@@ -66,9 +66,9 @@ class Attention(Module):
     ):
         super().__init__()
         dim_inner = dim_head * heads
-        self.to_q = NormLinear(dim, dim_inner, norm_dim = 0)
-        self.to_k = NormLinear(dim, dim_inner, norm_dim = 0)
-        self.to_v = NormLinear(dim, dim_inner, norm_dim = 0)
+        self.to_q = NormLinear(dim, dim_inner)
+        self.to_k = NormLinear(dim, dim_inner)
+        self.to_v = NormLinear(dim, dim_inner)
 
         self.rotary_emb = RotaryEmbedding(dim_head)
         self.qk_scale = nn.Parameter(torch.ones(dim_head) * (dim_head ** -0.25))
@@ -77,7 +77,7 @@ class Attention(Module):
         self.split_heads = Rearrange('b n (h d) -> b h n d', h = heads)
         self.merge_heads = Rearrange('b h n d -> b n (h d)')
 
-        self.to_out = NormLinear(dim_inner, dim)
+        self.to_out = NormLinear(dim_inner, dim, norm_dim_in = False)
 
     def forward(
         self,
@@ -123,13 +123,13 @@ class FeedForward(Module):
         self.dim = dim
         dim_inner = int(dim * expand_factor * 2 / 3)
 
-        self.to_hidden = NormLinear(dim, dim_inner, norm_dim = 0)
-        self.to_gate = NormLinear(dim, dim_inner, norm_dim = 0)
+        self.to_hidden = NormLinear(dim, dim_inner)
+        self.to_gate = NormLinear(dim, dim_inner)
 
         self.hidden_scale = nn.Parameter(torch.ones(dim_inner))
         self.gate_scale = nn.Parameter(torch.ones(dim_inner))
 
-        self.to_out = NormLinear(dim_inner, dim)
+        self.to_out = NormLinear(dim_inner, dim, norm_dim_in = False)
 
     def forward(self, x):
         hidden, gate = self.to_hidden(x), self.to_gate(x)
@@ -177,7 +177,7 @@ class nGPT(Module):
                 nn.Parameter(torch.ones(dim) * residual_lerp_scale_init),
             ]))
 
-        self.to_logits = NormLinear(dim, num_tokens, norm_dim = 0)
+        self.to_logits = NormLinear(dim, num_tokens)
 
         self.logit_scale = nn.Parameter(torch.ones(num_tokens))
 
