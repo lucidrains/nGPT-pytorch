@@ -23,6 +23,8 @@ GENERATE_EVERY = 500
 GENERATE_LENGTH = 512
 SEQ_LEN = 512
 
+device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
+
 # helpers
 
 def exists(v):
@@ -51,18 +53,21 @@ def gumbel_noise(t):
 def gumbel_sample(t, temperature = 1., dim = -1, keepdim = True):
     return ((t / max(temperature, 1e-10)) + gumbel_noise(t)).argmax(dim = dim, keepdim = keepdim)
 
-def top_k(logits, thres = 0.9):
-    k = math.ceil((1 - thres) * logits.shape[-1])
-    val, ind = torch.topk(logits, k)
-    probs = torch.full_like(logits, float('-inf'))
-    probs.scatter_(-1, ind, val)
-    return probs
+# min_p
+# https://arxiv.org/abs/2407.01082
+
+def min_p_filter(logits, min_p = 0.1):
+    probs = logits.softmax(dim = -1)
+    max_probs = probs.amax(dim = -1, keepdim = True)
+    limit = min_p * max_probs
+    return torch.where(probs < limit, float('-inf'), logits)
 
 def base_decoding(
     net,
     prompt: Tensor,
     seq_len: int,
-    temperature = 1.,
+    temperature = 1.5,
+    min_p = 1e-1,
     filter_thres = 0.9,
 ):
     prompt_seq_len, out = prompt.shape[-1], prompt.clone()
@@ -72,20 +77,20 @@ def base_decoding(
         logits = net(out)
         logits = logits[:, -1]
 
-        logits = top_k(logits, thres = filter_thres)
+        logits = min_p_filter(logits, min_p = min_p)
         sample = gumbel_sample(logits, temperature = temperature, dim = -1)
 
         out = torch.cat((out, sample), dim = -1)
 
     return out[..., prompt_seq_len:]
 
-# the minGRU char language model
+# nGPT char language model
 
 model = nGPT(
     num_tokens = 256,
     dim = 512,
     depth = 6
-).cuda()
+).to(device)
 
 # prepare enwik8 data
 
@@ -106,7 +111,7 @@ class TextSamplerDataset(Dataset):
     def __getitem__(self, index):
         rand_start = torch.randint(0, self.data.size(0) - self.seq_len, (1,))
         full_seq = self.data[rand_start : rand_start + self.seq_len + 1].long()
-        return full_seq.cuda()
+        return full_seq.to(device)
 
 train_dataset = TextSamplerDataset(data_train, SEQ_LEN)
 val_dataset = TextSamplerDataset(data_val, SEQ_LEN)
@@ -138,6 +143,8 @@ for i in tqdm.tqdm(range(NUM_BATCHES), mininterval = 10.0, desc = "training"):
 
     optim.step()
     optim.zero_grad()
+
+    model.norm_weights_()
 
     if i % VALIDATE_EVERY == 0:
         model.eval()
