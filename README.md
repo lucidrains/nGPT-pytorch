@@ -2,6 +2,33 @@
 
 Quick implementation of <a href="https://arxiv.org/abs/2410.01131">nGPT</a>, learning entirely on the hypersphere, from NvidiaAI. The question is whether there is any loss of expressivity they swept under the rug, but I'll take it with good faith.
 
+## Install
+
+```bash
+$ pip install nGPT-pytorch
+```
+
+## Usage
+
+```python
+import torch
+from nGPT_pytorch import nGPT
+
+model = nGPT(
+    num_tokens = 256,
+    dim = 512,
+    depth = 4,
+    attn_norm_qk = True
+)
+
+x = torch.randint(0, 256, (2, 2048))
+
+loss = model(x, return_loss = True)
+loss.backward()
+
+logits = model(x) # (2, 2048, 256)
+```
+
 ## Citations
 
 ```bibtex

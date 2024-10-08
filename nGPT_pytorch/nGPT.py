@@ -9,6 +9,8 @@ import torch.nn.utils.parametrize as parametrize
 from einops import einsum, rearrange
 from einops.layers.torch import Rearrange
 
+from rotary_embedding_torch import RotaryEmbedding, apply_rotary_emb
+
 # functions
 
 def exists(v):
@@ -62,13 +64,16 @@ class Attention(Module):
         *,
         dim_head = 64,
         heads = 8,
-        norm_qk = False
+        norm_qk = True
     ):
         super().__init__()
         dim_inner = dim_head * heads
         self.to_q = NormLinear(dim, dim_inner, norm_dim = 0)
         self.to_k = NormLinear(dim, dim_inner, norm_dim = 0)
         self.to_v = NormLinear(dim, dim_inner, norm_dim = 0)
+
+        self.rotary_emb = RotaryEmbedding(dim_head)
+        self.qk_scale = nn.Parameter(torch.ones(dim_head) * (dim_head ** -0.25))
 
         self.norm_qk = norm_qk
         self.split_heads = Rearrange('b n (h d) -> b h n d', h = heads)
@@ -84,8 +89,19 @@ class Attention(Module):
 
         q, k, v = map(self.split_heads, (q, k, v))
 
+        # maybe query key norm
+
         if self.norm_qk:
             q, k = map(l2norm, (q, k))
+
+        # scaling queries and keys - this would line up with the popular use of qk rmsnorm from google deepmind and now black forest labs
+
+        q, k = (q * self.qk_scale), (k * self.qk_scale)
+
+        # rotary positions
+
+        q = self.rotary_emb.rotate_queries_or_keys(q)
+        k = self.rotary_emb.rotate_queries_or_keys(k)
 
         # scale is 1., as scaling factor is moved to s_qk (dk ^ 0.25) - eq. 16
 
@@ -127,7 +143,7 @@ class nGPT(Module):
         depth,
         dim_head = 64,
         heads = 8,
-        attn_norm_qk = False,  # they say the query/key normalization is optional
+        attn_norm_qk = True,  # they say the query/key normalization is optional
         ff_expand_factor = 4.,
         ce_ignore_index = -1,
         residual_lerp_scale_init = None
