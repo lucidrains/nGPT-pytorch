@@ -12,3 +12,14 @@ Quick implementation of nGPT, learning entirely on the hypersphere, from NvidiaA
     url     = {https://api.semanticscholar.org/CorpusID:273026160}
 }
 ```
+
+```bibtex
+@article{Luo2017CosineNU,
+    title     = {Cosine Normalization: Using Cosine Similarity Instead of Dot Product in Neural Networks},
+    author    = {Chunjie Luo and Jianfeng Zhan and Lei Wang and Qiang Yang},
+    journal   = {ArXiv},
+    year      = {2017},
+    volume    = {abs/1702.05870},
+    url       = {https://api.semanticscholar.org/CorpusID:1505432}
+}
+```
