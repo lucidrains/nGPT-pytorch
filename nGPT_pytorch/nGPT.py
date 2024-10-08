@@ -1,15 +1,13 @@
-from functools import partial
-
 import torch
 from torch import nn
 from torch.nn import Module, ModuleList
 import torch.nn.functional as F
 import torch.nn.utils.parametrize as parametrize
 
-from einops import einsum, rearrange
+from einops import rearrange
 from einops.layers.torch import Rearrange
 
-from rotary_embedding_torch import RotaryEmbedding, apply_rotary_emb
+from rotary_embedding_torch import RotaryEmbedding
 
 # functions
 
