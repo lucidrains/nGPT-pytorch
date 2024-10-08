@@ -29,6 +29,14 @@ loss.backward()
 logits = model(x) # (2, 2048, 256)
 ```
 
+## Test
+
+Enwik8
+
+```bash
+$ python train.py
+```
+
 ## Citations
 
 ```bibtex
