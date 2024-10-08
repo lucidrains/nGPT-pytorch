@@ -23,6 +23,8 @@ GENERATE_EVERY = 500
 GENERATE_LENGTH = 512
 SEQ_LEN = 512
 
+device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
+
 # helpers
 
 def exists(v):
@@ -85,7 +87,7 @@ model = nGPT(
     num_tokens = 256,
     dim = 512,
     depth = 6
-).cuda()
+).to(device)
 
 # prepare enwik8 data
 
@@ -106,7 +108,7 @@ class TextSamplerDataset(Dataset):
     def __getitem__(self, index):
         rand_start = torch.randint(0, self.data.size(0) - self.seq_len, (1,))
         full_seq = self.data[rand_start : rand_start + self.seq_len + 1].long()
-        return full_seq.cuda()
+        return full_seq.to(device)
 
 train_dataset = TextSamplerDataset(data_train, SEQ_LEN)
 val_dataset = TextSamplerDataset(data_val, SEQ_LEN)
@@ -138,6 +140,8 @@ for i in tqdm.tqdm(range(NUM_BATCHES), mininterval = 10.0, desc = "training"):
 
     optim.step()
     optim.zero_grad()
+
+    model.norm_weights_()
 
     if i % VALIDATE_EVERY == 0:
         model.eval()

@@ -183,6 +183,17 @@ class nGPT(Module):
 
         self.ignore_index = ce_ignore_index
 
+    @torch.no_grad()
+    def norm_weights_(self):
+        for module in self.modules():
+            if not isinstance(module, NormLinear):
+                continue
+
+            normed = module.weight
+            original = module.linear.parametrizations.weight.original
+
+            original.copy_(normed)
+
     def forward(
         self,
         ids,
