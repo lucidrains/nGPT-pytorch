@@ -122,15 +122,25 @@ class FeedForward(Module):
         expand_factor = 4
     ):
         super().__init__()
+        self.dim = dim
         dim_inner = int(dim * expand_factor * 2 / 3)
+
         self.to_hidden = NormLinear(dim, dim_inner, norm_dim = 0)
         self.to_gate = NormLinear(dim, dim_inner, norm_dim = 0)
+
+        self.hidden_scale = nn.Parameter(torch.ones(dim_inner))
+        self.gate_scale = nn.Parameter(torch.ones(dim_inner))
+
         self.to_out = NormLinear(dim_inner, dim)
 
     def forward(self, x):
-        x, gate = self.to_hidden(x), self.to_gate(x)
-        x = F.silu(gate) * x
-        return self.to_out(x)
+        hidden, gate = self.to_hidden(x), self.to_gate(x)
+
+        hidden = hidden * self.hidden_scale
+        gate = gate * self.gate_scale * (self.dim ** 0.5)
+
+        hidden = F.silu(gate) * hidden
+        return self.to_out(hidden)
 
 # classes
 
@@ -149,6 +159,7 @@ class nGPT(Module):
         residual_lerp_scale_init = None
     ):
         super().__init__()
+        self.dim = dim
 
         residual_lerp_scale_init = default(residual_lerp_scale_init, 1. / depth)
 
@@ -168,7 +179,10 @@ class nGPT(Module):
                 nn.Parameter(torch.ones(dim) * residual_lerp_scale_init),
             ]))
 
-        self.token_unembed = NormLinear(dim, num_tokens, norm_dim = 0)
+        self.to_logits = NormLinear(dim, num_tokens, norm_dim = 0)
+
+        self.logit_scale = nn.Parameter(torch.ones(num_tokens))
+
         self.ignore_index = ce_ignore_index
 
     def forward(
@@ -190,7 +204,8 @@ class nGPT(Module):
             ff_out = ff(tokens)
             tokens = l2norm(tokens.lerp(ff_out, ff_alpha))
 
-        logits = self.token_unembed(tokens)
+        logits = self.to_logits(tokens)
+        logits = logits * self.logit_scale * (self.dim ** 0.5)
 
         if not return_loss:
             return logits
