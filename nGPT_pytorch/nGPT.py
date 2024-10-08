@@ -71,7 +71,7 @@ class Attention(Module):
         self.to_v = NormLinear(dim, dim_inner)
 
         self.rotary_emb = RotaryEmbedding(dim_head)
-        self.qk_scale = nn.Parameter(torch.ones(dim_head) * (dim_head ** -0.25))
+        self.qk_scale = nn.Parameter(torch.ones(dim_head) * (dim_head ** 0.25))
 
         self.norm_qk = norm_qk
         self.split_heads = Rearrange('b n (h d) -> b h n d', h = heads)
@@ -207,10 +207,10 @@ class nGPT(Module):
 
         for (attn, ff), (attn_alpha, ff_alpha) in zip(self.layers, self.residual_lerp_scales):
 
-            attn_out = attn(tokens)
+            attn_out = l2norm(attn(tokens))
             tokens = l2norm(tokens.lerp(attn_out, attn_alpha))
 
-            ff_out = ff(tokens)
+            ff_out = l2norm(ff(tokens))
             tokens = l2norm(tokens.lerp(ff_out, ff_alpha))
 
         logits = self.to_logits(tokens)

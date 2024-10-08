@@ -89,7 +89,7 @@ def base_decoding(
 model = nGPT(
     num_tokens = 256,
     dim = 512,
-    depth = 6
+    depth = 8
 ).to(device)
 
 # prepare enwik8 data
