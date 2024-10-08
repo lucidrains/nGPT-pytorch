@@ -4,6 +4,8 @@
 
 Quick implementation of <a href="https://arxiv.org/abs/2410.01131">nGPT</a>, learning entirely on the hypersphere, from NvidiaAI. The question is whether there is any loss of expressivity they swept under the rug, but I'll take it with good faith.
 
+This type of network should also be studied in the context of continual learning
+
 ## Install
 
 ```bash
