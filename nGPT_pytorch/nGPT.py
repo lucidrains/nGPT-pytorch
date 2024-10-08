@@ -6,6 +6,8 @@ from torch.nn import Module, ModuleList
 import torch.nn.functional as F
 import torch.nn.utils.parametrize as parametrize
 
+from einops import einsum, rearrange
+
 # functions
 
 def exists(v):
@@ -14,22 +16,41 @@ def exists(v):
 def default(v, d):
     return v if exists(v) else d
 
-def l2norm(t):
-    return F.normalize(t, dim = -1, p = 2)
+def l2norm(t, dim = -1):
+    return F.normalize(t, dim = dim, p = 2)
 
 # for use with parametrize
 
-LinearNoBias = partial(nn.Linear, bias = False)
-
 class L2Norm(Module):
-    def forward(self, t):
-        return l2norm(t)
+    def __init__(self, dim = -1):
+        super().__init__()
+        self.dim = dim
 
-l2norm_weights = partial(
-    parametrize.register_parametrization,
-    tensor_name = 'weight',
-    parametrization = L2Norm()
-)
+    def forward(self, t):
+        return l2norm(t, dim = self.dim)
+
+class NormLinear(Module):
+    def __init__(
+        self,
+        dim,
+        dim_out,
+        norm_dim = -1
+    ):
+        super().__init__()
+        self.linear = nn.Linear(dim, dim_out, bias = False)
+
+        parametrize.register_parametrization(
+            self.linear,
+            'weight',
+            L2Norm(dim = norm_dim)
+        )
+
+    @property
+    def weight(self):
+        return self.linear.weight
+
+    def forward(self, x):
+        return self.linear(x)
 
 # attention and feedforward
 
@@ -43,16 +64,11 @@ class Attention(Module):
     ):
         super().__init__()
         dim_inner = dim_head * heads
-        self.query_weights = LinearNoBias(dim_inner, dim)
-        self.key_weights = LinearNoBias(dim_inner, dim)
-        self.value_weights = LinearNoBias(dim_inner, dim)
+        self.query_weights = NormLinear(dim, dim_inner)
+        self.key_weights = NormLinear(dim, dim_inner)
+        self.value_weights = NormLinear(dim, dim_inner)
 
-        self.out_weights = LinearNoBias(dim_inner, dim)
-
-        l2norm_weights(self.query_weights)
-        l2norm_weights(self.key_weights)
-        l2norm_weights(self.value_weights)
-        l2norm_weights(self.out_weights)
+        self.out_weights = NormLinear(dim_inner, dim, norm_dim = -1)
 
     def forward(
         self,
@@ -69,13 +85,9 @@ class FeedForward(Module):
     ):
         super().__init__()
         dim_inner = int(dim * expand_factor * 2 / 3)
-        self.proj_in_weights = LinearNoBias(dim_inner, dim)
-        self.gate_weights = LinearNoBias(dim_inner, dim)
-        self.proj_out_weights = LinearNoBias(dim_inner, dim)
-
-        l2norm_weights(self.proj_in_weights)
-        l2norm_weights(self.gate_weights)
-        l2norm_weights(self.proj_out_weights)
+        self.proj_in_weights = NormLinear(dim, dim_inner)
+        self.gate_weights = NormLinear(dim, dim_inner)
+        self.proj_out_weights = NormLinear(dim_inner, dim)
 
     def forward(self, x):
         return x
@@ -91,12 +103,12 @@ class nGPT(Module):
         depth,
         dim_head = 64,
         heads = 8,
-        ff_expand_factor = 4.
+        ff_expand_factor = 4.,
+        ce_ignore_index = -1
     ):
         super().__init__()
 
-        self.token_embed = LinearNoBias(dim, num_tokens)
-        self.token_unembed = LinearNoBias(dim, num_tokens)
+        self.token_embed = NormLinear(dim, num_tokens)
 
         self.layers = ModuleList([])
 
@@ -106,14 +118,29 @@ class nGPT(Module):
                 FeedForward(dim, expand_factor = ff_expand_factor),
             ]))
 
-        l2norm_weights(self.token_embed)
-        l2norm_weights(self.token_unembed)
+        self.token_unembed = NormLinear(dim, num_tokens, norm_dim = 0)
+        self.ignore_index = ce_ignore_index
 
     def forward(
         self,
         ids,
         return_loss = False
     ):
+
+        if return_loss:
+            ids, labels = ids[:, :-1], ids[:, 1:]
+
         tokens = self.token_embed.weight[ids]
 
-        return tokens
+        logits = self.token_unembed(tokens)
+
+        if not return_loss:
+            return logits
+
+        loss = F.cross_entropy(
+            rearrange(logits, 'b n c -> b c n'),
+            labels,
+            ignore_index = self.ignore_index
+        )
+
+        return loss
