@@ -17,7 +17,7 @@ from nGPT_pytorch import nGPT
 NUM_BATCHES = int(1e5)
 BATCH_SIZE = 4
 GRAD_ACCUM_EVERY = 4
-LEARNING_RATE = 1e-4
+LEARNING_RATE = 1e-3
 VALIDATE_EVERY = 100
 PRIME_LENGTH = 128
 GENERATE_EVERY = 500
@@ -91,7 +91,7 @@ model = nGPT(
     num_tokens = 256,
     dim = 512,
     depth = 8,
-    manual_norm_weights = True
+    manual_norm_weights = True,
 ).to(device)
 
 # prepare enwik8 data

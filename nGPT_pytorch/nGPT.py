@@ -22,6 +22,25 @@ def default(v, d):
 def l2norm(t, dim = -1):
     return F.normalize(t, dim = dim, p = 2)
 
+# scale
+
+class Scale(Module):
+    """
+    latter part of section 2.5 in the paper
+    """
+    def __init__(
+        self,
+        dim,
+        init = 1.,
+        scale = 1.
+    ):
+        super().__init__()
+        self.scale = nn.Parameter(torch.ones(dim) * scale)
+        self.forward_scale = init / scale
+
+    def forward(self):
+        return self.scale * self.forward_scale
+
 # for use with parametrize
 
 class L2Norm(Module):
@@ -87,13 +106,18 @@ class Attention(Module):
         super().__init__()
         NormLinear_ = partial(NormLinear, parametrize = not manual_norm_weights)
 
+        dim_sqrt = dim ** 0.5
+        self.dim_sqrt = dim_sqrt
+        self.attn_scale = dim_head ** 0.5
+
         dim_inner = dim_head * heads
         self.to_q = NormLinear_(dim, dim_inner)
         self.to_k = NormLinear_(dim, dim_inner)
         self.to_v = NormLinear_(dim, dim_inner)
 
         self.rotary_emb = RotaryEmbedding(dim_head)
-        self.qk_scale = nn.Parameter(torch.ones(dim_head) * (dim_head ** 0.25))
+        self.q_scale = Scale(dim, 1, dim ** -0.5)
+        self.k_scale = Scale(dim, 1, dim ** -0.5)
 
         self.norm_qk = norm_qk
         self.split_heads = Rearrange('b n (h d) -> b h n d', h = heads)
@@ -107,6 +131,13 @@ class Attention(Module):
     ):
         q, k, v = self.to_q(x), self.to_k(x), self.to_v(x)
 
+        # scaling queries and keys - this would line up with the popular use of qk rmsnorm from google deepmind and now black forest labs
+
+        q = q * self.q_scale()
+        k = k * self.k_scale()
+
+        # split heads
+
         q, k, v = map(self.split_heads, (q, k, v))
 
         # maybe query key norm
@@ -114,21 +145,17 @@ class Attention(Module):
         if self.norm_qk:
             q, k = map(l2norm, (q, k))
 
-        # scaling queries and keys - this would line up with the popular use of qk rmsnorm from google deepmind and now black forest labs
-
-        q, k = (q * self.qk_scale), (k * self.qk_scale)
-
         # rotary positions
 
         q = self.rotary_emb.rotate_queries_or_keys(q)
         k = self.rotary_emb.rotate_queries_or_keys(k)
 
-        # scale is 1., as scaling factor is moved to s_qk (dk ^ 0.25) - eq. 16
+        # scale is sqrt(dk)
 
         out = F.scaled_dot_product_attention(
             q, k, v,
             is_causal = True,
-            scale = 1.
+            scale = self.attn_scale
         )
 
         out = self.merge_heads(out)
@@ -151,16 +178,16 @@ class FeedForward(Module):
         self.to_hidden = NormLinear_(dim, dim_inner)
         self.to_gate = NormLinear_(dim, dim_inner)
 
-        self.hidden_scale = nn.Parameter(torch.ones(dim_inner))
-        self.gate_scale = nn.Parameter(torch.ones(dim_inner))
+        self.hidden_scale = Scale(dim_inner)
+        self.gate_scale = Scale(dim_inner)
 
         self.to_out = NormLinear_(dim_inner, dim, norm_dim_in = False)
 
     def forward(self, x):
         hidden, gate = self.to_hidden(x), self.to_gate(x)
 
-        hidden = hidden * self.hidden_scale
-        gate = gate * self.gate_scale * (self.dim ** 0.5)
+        hidden = hidden * self.hidden_scale()
+        gate = gate * self.gate_scale() * (self.dim ** 0.5)
 
         hidden = F.silu(gate) * hidden
         return self.to_out(hidden)
@@ -187,28 +214,23 @@ class nGPT(Module):
         NormLinear_ = partial(NormLinear, parametrize = not manual_norm_weights)
 
         self.dim = dim
-
         residual_lerp_scale_init = default(residual_lerp_scale_init, 1. / depth)
 
         self.token_embed = NormLinear_(dim, num_tokens)
 
         self.layers = ModuleList([])
-        self.residual_lerp_scales = nn.ParameterList([])
 
         for _ in range(depth):
             self.layers.append(ModuleList([
                 Attention(dim, dim_head = dim_head, heads = heads, norm_qk = attn_norm_qk, manual_norm_weights = manual_norm_weights),
                 FeedForward(dim, expand_factor = ff_expand_factor, manual_norm_weights = manual_norm_weights),
-            ]))
-
-            self.residual_lerp_scales.append(nn.ParameterList([
-                nn.Parameter(torch.ones(dim) * residual_lerp_scale_init),
-                nn.Parameter(torch.ones(dim) * residual_lerp_scale_init),
+                Scale(dim, residual_lerp_scale_init, dim ** -0.5),
+                Scale(dim, residual_lerp_scale_init, dim ** -0.5),
             ]))
 
         self.to_logits = NormLinear_(dim, num_tokens) if not tied_embedding else None
 
-        self.logit_scale = nn.Parameter(torch.ones(num_tokens))
+        self.logit_scale = Scale(num_tokens, 1., dim ** -0.5)
 
         self.ignore_index = ce_ignore_index
 
@@ -232,13 +254,13 @@ class nGPT(Module):
         token_embed = self.token_embed.weight
         tokens = token_embed[ids]
 
-        for (attn, ff), (attn_alpha, ff_alpha) in zip(self.layers, self.residual_lerp_scales):
+        for attn, ff, attn_alpha, ff_alpha in self.layers:
 
             attn_out = l2norm(attn(tokens))
-            tokens = l2norm(tokens.lerp(attn_out, attn_alpha))
+            tokens = l2norm(tokens.lerp(attn_out, attn_alpha()))
 
             ff_out = l2norm(ff(tokens))
-            tokens = l2norm(tokens.lerp(ff_out, ff_alpha))
+            tokens = l2norm(tokens.lerp(ff_out, ff_alpha()))
 
         if exists(self.to_logits):
             logits = self.to_logits(tokens)
@@ -246,7 +268,7 @@ class nGPT(Module):
             # tied embeddings
             logits = einsum(tokens, token_embed, 'b n d, c d -> b n c')
 
-        logits = logits * self.logit_scale * (self.dim ** 0.5)
+        logits = logits * self.logit_scale()
 
         if not return_loss:
             return logits
