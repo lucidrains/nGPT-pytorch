@@ -22,7 +22,7 @@ def default(v, d):
 def l2norm(
     t,
     dim = -1,
-    norm_eps = 0.,  # allow vectors to inhabit a small distance below and above the hypersphere if greater than 0.
+    norm_eps = 0.05,  # allow vectors to inhabit a small distance below and above the hypersphere if greater than 0.
     eps = 1e-10
 ):
     if norm_eps == 0.:
