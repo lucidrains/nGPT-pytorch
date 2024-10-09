@@ -8,6 +8,7 @@ import torch
 from torch.optim import Adam
 from torch import Tensor
 from torch.utils.data import DataLoader, Dataset
+import torch.nn.utils.parametrize as parametrize
 
 from nGPT_pytorch import nGPT
 
@@ -89,7 +90,8 @@ def base_decoding(
 model = nGPT(
     num_tokens = 256,
     dim = 512,
-    depth = 8
+    depth = 8,
+    manual_norm_weights = True
 ).to(device)
 
 # prepare enwik8 data
