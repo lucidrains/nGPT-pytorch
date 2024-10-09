@@ -6,7 +6,7 @@ from torch.nn import Module, ModuleList
 import torch.nn.functional as F
 from torch.nn.utils.parametrize import register_parametrization
 
-from einops import rearrange
+from einops import rearrange, einsum
 from einops.layers.torch import Rearrange
 
 from rotary_embedding_torch import RotaryEmbedding
@@ -180,7 +180,8 @@ class nGPT(Module):
         ff_expand_factor = 4.,
         ce_ignore_index = -1,
         residual_lerp_scale_init = None,
-        manual_norm_weights = False
+        manual_norm_weights = False,
+        tied_embedding = False
     ):
         super().__init__()
         NormLinear_ = partial(NormLinear, parametrize = not manual_norm_weights)
@@ -205,7 +206,7 @@ class nGPT(Module):
                 nn.Parameter(torch.ones(dim) * residual_lerp_scale_init),
             ]))
 
-        self.to_logits = NormLinear_(dim, num_tokens)
+        self.to_logits = NormLinear_(dim, num_tokens) if not tied_embedding else None
 
         self.logit_scale = nn.Parameter(torch.ones(num_tokens))
 
@@ -228,7 +229,8 @@ class nGPT(Module):
         if return_loss:
             ids, labels = ids[:, :-1], ids[:, 1:]
 
-        tokens = self.token_embed.weight[ids]
+        token_embed = self.token_embed.weight
+        tokens = token_embed[ids]
 
         for (attn, ff), (attn_alpha, ff_alpha) in zip(self.layers, self.residual_lerp_scales):
 
@@ -238,7 +240,12 @@ class nGPT(Module):
             ff_out = l2norm(ff(tokens))
             tokens = l2norm(tokens.lerp(ff_out, ff_alpha))
 
-        logits = self.to_logits(tokens)
+        if exists(self.to_logits):
+            logits = self.to_logits(tokens)
+        else:
+            # tied embeddings
+            logits = einsum(tokens, token_embed, 'b n d, c d -> b n c')
+
         logits = logits * self.logit_scale * (self.dim ** 0.5)
 
         if not return_loss:
