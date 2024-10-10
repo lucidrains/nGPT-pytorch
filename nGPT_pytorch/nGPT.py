@@ -40,9 +40,11 @@ def cast_tuple(t, length = 1):
 def l2norm(
     t,
     dim = -1,
-    norm_eps = 0.05,  # allow vectors to inhabit a small distance below and above the hypersphere if greater than 0.
-    eps = 1e-10
+    norm_eps = 0.,
+    eps = None
 ):
+    eps = default(eps, 1e-5 if t.dtype == torch.float16 else 1e-10)
+
     if norm_eps == 0.:
         return F.normalize(t, dim = dim, p = 2, eps = eps)
 
