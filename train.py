@@ -92,6 +92,7 @@ model = nGPT(
     dim = 512,
     depth = 8,
     manual_norm_weights = True,
+    tied_embedding = True
 ).to(device)
 
 # prepare enwik8 data
