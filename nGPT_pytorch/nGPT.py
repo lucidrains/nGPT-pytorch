@@ -13,6 +13,17 @@ from einops.layers.torch import Rearrange
 
 from rotary_embedding_torch import RotaryEmbedding
 
+# constants
+
+from torch.nn.attention import SDPBackend
+
+SDP_BACKEND_MAP = dict(
+    enable_flash = SDPBackend.FLASH_ATTENTION,
+    enable_mem_efficient = SDPBackend.EFFICIENT_ATTENTION,
+    enable_math = SDPBackend.MATH,
+    enable_cudnn = SDPBackend.CUDNN_ATTENTION
+)
+
 # functions
 
 def exists(v):
@@ -26,8 +37,19 @@ def cast_tuple(t, length = 1):
     assert len(out) == length
     return out
 
-def l2norm(t, dim = -1):
-    return F.normalize(t, dim = dim, p = 2)
+def l2norm(
+    t,
+    dim = -1,
+    norm_eps = 0.05,  # allow vectors to inhabit a small distance below and above the hypersphere if greater than 0.
+    eps = 1e-10
+):
+    if norm_eps == 0.:
+        return F.normalize(t, dim = dim, p = 2, eps = eps)
+
+    norm = t.norm(dim = dim, keepdim = True)
+    target_norm = norm.detach().clamp(min = 1. - norm_eps, max = 1. + norm_eps)
+    divisor = norm / target_norm
+    return t / divisor.clamp(min = eps)
 
 # scale
 
@@ -51,12 +73,13 @@ class Scale(Module):
 # for use with parametrize
 
 class L2Norm(Module):
-    def __init__(self, dim = -1):
+    def __init__(self, dim = -1, norm_eps = 0.):
         super().__init__()
         self.dim = dim
+        self.norm_eps = norm_eps
 
     def forward(self, t):
-        return l2norm(t, dim = self.dim)
+        return l2norm(t, dim = self.dim, norm_eps = self.norm_eps)
 
 class NormLinear(Module):
     def __init__(
@@ -64,13 +87,14 @@ class NormLinear(Module):
         dim,
         dim_out,
         norm_dim_in = True,
-        parametrize = True
+        parametrize = True,
+        norm_eps = 0.
     ):
         super().__init__()
         self.linear = nn.Linear(dim, dim_out, bias = False)
 
         self.parametrize = parametrize
-        self.l2norm = L2Norm(dim = -1 if norm_dim_in else 0)
+        self.l2norm = L2Norm(dim = -1 if norm_dim_in else 0, norm_eps = norm_eps)
 
         if parametrize:
             register_parametrization(
@@ -98,7 +122,7 @@ class NormLinear(Module):
     def forward(self, x):
         return self.linear(x)
 
-# attention and feedforward
+# attention
 
 class Attention(Module):
     def __init__(
@@ -110,10 +134,17 @@ class Attention(Module):
         norm_qk = True,
         manual_norm_weights = False,
         s_qk_init = 1.,
-        s_qk_scale = None
+        s_qk_scale = None,
+        flash_kwargs: dict = dict(
+            enable_flash = True,
+            enable_math = True,
+            enable_mem_efficient = True
+        ),
+        norm_eps = 0.
     ):
         super().__init__()
-        NormLinear_ = partial(NormLinear, parametrize = not manual_norm_weights)
+        NormLinear_ = partial(NormLinear, parametrize = not manual_norm_weights, norm_eps = norm_eps)
+        self.l2norm = partial(l2norm, norm_eps = norm_eps)
 
         dim_sqrt = dim ** 0.5
         self.dim_sqrt = dim_sqrt
@@ -124,11 +155,21 @@ class Attention(Module):
         self.to_k = NormLinear_(dim, dim_inner)
         self.to_v = NormLinear_(dim, dim_inner)
 
+        # flash attention related context manager
+
+        sdpa_backends = [SDP_BACKEND_MAP[enable_str] for enable_str, enable in flash_kwargs.items() if enable]
+        self.sdpa_context_manager = partial(torch.nn.attention.sdpa_kernel, sdpa_backends)
+
+        # rotary 
+
         self.rotary_emb = RotaryEmbedding(dim_head)
-        self.q_scale = Scale(dim, 1, dim ** -0.5)
-        self.k_scale = Scale(dim, 1, dim ** -0.5)
+
+        # qk rmsnorm + scale
 
         self.norm_qk = norm_qk
+        self.q_scale = Scale(dim, s_qk_init, default(s_qk_scale, dim ** -0.5))
+        self.k_scale = Scale(dim, s_qk_init, default(s_qk_scale, dim ** -0.5))
+
         self.split_heads = Rearrange('b n (h d) -> b h n d', h = heads)
         self.merge_heads = Rearrange('b h n d -> b n (h d)')
 
@@ -152,7 +193,7 @@ class Attention(Module):
         # maybe query key norm
 
         if self.norm_qk:
-            q, k = map(l2norm, (q, k))
+            q, k = map(self.l2norm, (q, k))
 
         # rotary positions
 
@@ -161,14 +202,17 @@ class Attention(Module):
 
         # scale is sqrt(dk)
 
-        out = F.scaled_dot_product_attention(
-            q, k, v,
-            is_causal = True,
-            scale = self.attn_scale
-        )
+        with self.sdpa_context_manager():
+            out = F.scaled_dot_product_attention(
+                q, k, v,
+                is_causal = True,
+                scale = self.attn_scale
+            )
 
         out = self.merge_heads(out)
         return self.to_out(out)
+
+# feedforward
 
 class FeedForward(Module):
     def __init__(
@@ -180,10 +224,11 @@ class FeedForward(Module):
         s_hidden_init = 1.,
         s_hidden_scale = 1.,
         s_gate_init = 1.,
-        s_gate_scale = 1.
+        s_gate_scale = 1.,
+        norm_eps = 0.
     ):
         super().__init__()
-        NormLinear_ = partial(NormLinear, parametrize = not manual_norm_weights)
+        NormLinear_ = partial(NormLinear, parametrize = not manual_norm_weights, norm_eps = norm_eps)
 
         self.dim = dim
         dim_inner = int(dim * expand_factor * 2 / 3)
@@ -234,10 +279,17 @@ class nGPT(Module):
         s_ff_hidden_init: float | tuple[float, ...] = 1.,
         s_ff_hidden_scale: float | tuple[float, ...] = 1.,
         s_ff_gate_init: float | tuple[float, ...] = 1.,
-        s_ff_gate_scale: float | tuple[float, ...] = 1.
+        s_ff_gate_scale: float | tuple[float, ...] = 1.,
+        attn_flash_kwargs: dict = dict(
+            enable_flash = True,
+            enable_math = True,
+            enable_mem_efficient = True
+        ),
+        norm_eps = 0. # greater than 0 allows the norm to be around (1. - norm_eps) to (1. + norm_eps)
     ):
         super().__init__()
-        NormLinear_ = partial(NormLinear, parametrize = not manual_norm_weights)
+        NormLinear_ = partial(NormLinear, parametrize = not manual_norm_weights, norm_eps = norm_eps)
+        self.l2norm = partial(l2norm, norm_eps = norm_eps)
 
         self.dim = dim
         alpha_init = default(alpha_init, 1. / depth)
@@ -282,6 +334,8 @@ class nGPT(Module):
                 manual_norm_weights = manual_norm_weights,
                 s_qk_init = s_qk_init_,
                 s_qk_scale = s_qk_scale_,
+                flash_kwargs = attn_flash_kwargs,
+                norm_eps = norm_eps
             )
 
             ff = FeedForward(
@@ -291,7 +345,8 @@ class nGPT(Module):
                 s_hidden_init = s_ff_hidden_init_,
                 s_hidden_scale = s_ff_hidden_scale_,
                 s_gate_init = s_ff_gate_init_,
-                s_gate_scale = s_ff_gate_scale_
+                s_gate_scale = s_ff_gate_scale_,
+                norm_eps = norm_eps
             )
 
             attn_interp_factor = Scale(
@@ -327,11 +382,11 @@ class nGPT(Module):
         ids,
         return_loss = False
     ):
+        token_embed, l2norm = self.token_embed.weight, self.l2norm
 
         if return_loss:
             ids, labels = ids[:, :-1], ids[:, 1:]
 
-        token_embed = self.token_embed.weight
         tokens = token_embed[ids]
 
         for attn, ff, attn_alpha, ff_alpha in self.layers:
