@@ -134,6 +134,7 @@ class Attention(Module):
         dim_head = 64,
         heads = 8,
         norm_qk = True,
+        causal = True,
         manual_norm_weights = False,
         s_qk_init = 1.,
         s_qk_scale = None,
@@ -145,6 +146,8 @@ class Attention(Module):
         norm_eps = 0.
     ):
         super().__init__()
+        self.causal = causal
+
         NormLinear_ = partial(NormLinear, parametrize = not manual_norm_weights, norm_eps = norm_eps)
         self.l2norm = partial(l2norm, norm_eps = norm_eps)
 
@@ -179,7 +182,8 @@ class Attention(Module):
 
     def forward(
         self,
-        x
+        x,
+        mask = None
     ):
         q, k, v = self.to_q(x), self.to_k(x), self.to_v(x)
 
@@ -202,12 +206,18 @@ class Attention(Module):
         q = self.rotary_emb.rotate_queries_or_keys(q)
         k = self.rotary_emb.rotate_queries_or_keys(k)
 
+        # for non-autoregressive masking
+
+        if exists(mask):
+            mask = rearrange(mask, 'b j -> b 1 1 j')
+
         # scale is sqrt(dk)
 
         with self.sdpa_context_manager():
             out = F.scaled_dot_product_attention(
                 q, k, v,
-                is_causal = True,
+                attn_mask = mask,
+                is_causal = self.causal,
                 scale = self.attn_scale
             )
 
@@ -268,6 +278,7 @@ class nGPT(Module):
         ce_ignore_index = -1,
         manual_norm_weights = False,
         tied_embedding = False,
+        causal = True,
         # below are all the scale related hyperparameters, for controlling effective relative learning rates throughout the network
         alpha_init: float | None = None,  # this would set the alpha init for all residuals, but would be overridden by alpha_attn_init and alpha_ff_init if they are specified
         s_logit_init: float  = 1.,
@@ -294,6 +305,7 @@ class nGPT(Module):
         self.l2norm = partial(l2norm, norm_eps = norm_eps)
 
         self.dim = dim
+        self.causal = causal
         alpha_init = default(alpha_init, 1. / depth)
 
         self.token_embed = NormLinear_(dim, num_tokens)
@@ -332,6 +344,7 @@ class nGPT(Module):
                 dim,
                 dim_head = dim_head,
                 heads = heads,
+                causal = causal,
                 norm_qk = attn_norm_qk,
                 manual_norm_weights = manual_norm_weights,
                 s_qk_init = s_qk_init_,
@@ -382,18 +395,20 @@ class nGPT(Module):
     def forward(
         self,
         ids,
+        mask = None,
         return_loss = False
     ):
         token_embed, l2norm = self.token_embed.weight, self.l2norm
 
         if return_loss:
+            assert self.causal
             ids, labels = ids[:, :-1], ids[:, 1:]
 
         tokens = token_embed[ids]
 
         for attn, ff, attn_alpha, ff_alpha in self.layers:
 
-            attn_out = l2norm(attn(tokens))
+            attn_out = l2norm(attn(tokens, mask = mask))
             tokens = l2norm(tokens.lerp(attn_out, attn_alpha()))
 
             ff_out = l2norm(ff(tokens))
