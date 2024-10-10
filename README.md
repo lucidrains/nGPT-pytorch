@@ -6,6 +6,8 @@ Quick implementation of <a href="https://arxiv.org/abs/2410.01131">nGPT</a>, lea
 
 This type of network should also be studied in the context of continual learning and <a href="https://www.nature.com/articles/s41586-024-07711-7">loss of plasticity</a>
 
+Adaptation to vision transformers is [here](https://github.com/lucidrains/vit-pytorch/blob/main/vit_pytorch/normalized_vit.py)
+
 ## Install
 
 ```bash
