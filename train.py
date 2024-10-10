@@ -142,8 +142,6 @@ for i in tqdm.tqdm(range(NUM_BATCHES), mininterval = 10.0, desc = "training"):
 
     print(f"training loss: {loss.item():.3f}")
 
-    torch.nn.utils.clip_grad_norm_(model.parameters(), 0.5)
-
     optim.step()
     optim.zero_grad()
 
