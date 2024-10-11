@@ -82,6 +82,28 @@ class Scale(Module):
     def forward(self):
         return self.scale * self.forward_scale
 
+# residual slerp update with learned scale
+
+class Residual(Module):
+    def __init__(
+        self,
+        fn: Module,
+        dim: int,
+        init: float,
+        scale: float
+    ):
+        super().__init__()
+        self.fn = fn
+        self.branch_scale = Scale(dim, init, default(scale, dim ** -0.5))
+
+    def forward(self, x, **kwargs):
+        residual = x
+
+        branch_out = l2norm(self.fn(x, **kwargs))
+        residual = l2norm(residual.lerp(branch_out, self.branch_scale()))
+
+        return residual
+
 # for use with parametrize
 
 class L2Norm(Module):
@@ -383,19 +405,21 @@ class nGPT(Module):
                 num_hyperspheres = num_hyperspheres
             )
 
-            attn_interp_factor = Scale(
+            attn_with_residual = Residual(
+                attn,
                 dim,
                 default(alpha_attn_init_, alpha_init),
                 default(alpha_attn_scale_, dim ** -0.5)
             )
 
-            ff_interp_factor = Scale(
+            ff_with_residual = Residual(
+                ff,
                 dim,
                 default(alpha_ff_init_, alpha_init),
                 default(alpha_ff_scale_, dim ** -0.5)
             )
 
-            self.layers.append(ModuleList([attn, ff, attn_interp_factor, ff_interp_factor]))
+            self.layers.append(ModuleList([attn_with_residual, ff_with_residual]))
 
         self.to_logits = NormLinear_(dim, num_tokens) if not tied_embedding else None
 
@@ -425,13 +449,9 @@ class nGPT(Module):
 
         tokens = token_embed[ids]
 
-        for attn, ff, attn_alpha, ff_alpha in self.layers:
-
-            attn_out = l2norm(attn(tokens, mask = mask))
-            tokens = l2norm(tokens.lerp(attn_out, attn_alpha()))
-
-            ff_out = l2norm(ff(tokens))
-            tokens = l2norm(tokens.lerp(ff_out, ff_alpha()))
+        for attn, ff in self.layers:
+            tokens = attn(tokens)
+            tokens = ff(tokens)
 
         if exists(self.to_logits):
             logits = self.to_logits(tokens)
