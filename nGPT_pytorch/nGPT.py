@@ -107,6 +107,7 @@ class NormLinear(Module):
         super().__init__()
         self.linear = nn.Linear(dim, dim_out, bias = False)
 
+        self.scale = groups ** -1
         self.parametrize = parametrize
         self.l2norm = L2Norm(dim = -1 if norm_dim_in else 0, norm_eps = norm_eps, groups = groups)
 
@@ -134,7 +135,7 @@ class NormLinear(Module):
         return self.linear.weight
 
     def forward(self, x):
-        return self.linear(x)
+        return self.linear(x) * self.scale
 
 # attention
 
@@ -159,6 +160,7 @@ class Attention(Module):
         num_hyperspheres = 1
     ):
         super().__init__()
+        self.heads = heads
         self.causal = causal
 
         NormLinear_ = partial(NormLinear, parametrize = not manual_norm_weights, norm_eps = norm_eps, groups = num_hyperspheres)
@@ -200,11 +202,6 @@ class Attention(Module):
     ):
         q, k, v = self.to_q(x), self.to_k(x), self.to_v(x)
 
-        # scaling queries and keys - this would line up with the popular use of qk rmsnorm from google deepmind and now black forest labs
-
-        q = q * self.q_scale()
-        k = k * self.k_scale()
-
         # split heads
 
         q, k, v = map(self.split_heads, (q, k, v))
@@ -213,6 +210,11 @@ class Attention(Module):
 
         if self.norm_qk:
             q, k = map(self.l2norm, (q, k))
+
+        # scaling queries and keys - this would line up with the popular use of qk rmsnorm from google deepmind and now black forest labs - will use multihead rmsnorm
+
+        q = q * rearrange(self.q_scale(), '(h d) -> h 1 d', h = self.heads)
+        k = k * rearrange(self.k_scale(), '(h d) -> h 1 d', h = self.heads)
 
         # rotary positions
 
