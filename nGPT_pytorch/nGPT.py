@@ -441,7 +441,7 @@ class nGPT(Module):
         mask = None,
         return_loss = False
     ):
-        token_embed, l2norm = self.token_embed.weight, self.l2norm
+        token_embed = self.token_embed.weight
 
         if return_loss:
             assert self.causal
