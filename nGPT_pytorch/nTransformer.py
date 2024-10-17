@@ -317,6 +317,7 @@ class nTransformer(Module):
         norm_eps = 0. # greater than 0 allows the norm to be around (1. - norm_eps) to (1. + norm_eps)
     ):
         super().__init__()
+        self.l2norm = partial(l2norm, norm_eps = norm_eps, groups = num_hyperspheres)
 
         self.dim = dim
         self.causal = causal
@@ -404,7 +405,11 @@ class nTransformer(Module):
         self,
         tokens,
         mask = None,
+        norm_input = False
     ):
+
+        if norm_input:
+            tokens = self.l2norm(tokens)
 
         for attn, ff, attn_alpha, ff_alpha in self.layers:
 
@@ -427,5 +432,5 @@ if __name__ == '__main__':
 
     x = torch.randn(1, 1024, 512)
 
-    embed = transformer(x)
+    embed = transformer(x, norm_input = True)
     assert x.shape == embed.shape
