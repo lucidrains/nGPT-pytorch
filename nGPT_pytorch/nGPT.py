@@ -306,9 +306,9 @@ class nGPT(Module):
     def __init__(
         self,
         *,
+        num_tokens,
         dim,
         depth,
-        num_tokens = None,
         dim_head = 64,
         heads = 8,
         attn_norm_qk = True,  # they say the query/key normalization is optional
@@ -347,12 +347,7 @@ class nGPT(Module):
         self.causal = causal
         alpha_init = default(alpha_init, 1. / depth)
 
-        # allow for plain stack of attention and feedforward, for trying to use in a different setting
-
-        only_transformer = not exists(num_tokens)
-        self.only_transformer = only_transformer
-
-        self.token_embed = NormLinear_(dim, num_tokens) if not only_transformer else None
+        self.token_embed = NormLinear_(dim, num_tokens)
 
         self.layers = ModuleList([])
 
@@ -426,7 +421,7 @@ class nGPT(Module):
 
             self.layers.append(ModuleList([attn_with_residual, ff_with_residual]))
 
-        self.to_logits = NormLinear_(dim, num_tokens) if (not tied_embedding or only_transformer) or not exists(num_tokens) else None
+        self.to_logits = NormLinear_(dim, num_tokens) if not tied_embedding else None
 
         self.logit_scale = Scale(num_tokens, s_logit_init, default(s_logit_scale, dim ** -0.5))
 
