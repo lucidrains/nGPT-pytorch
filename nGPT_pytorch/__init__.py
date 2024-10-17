@@ -7,3 +7,5 @@ from nGPT_pytorch.nGPT import (
     Attention,
     nGPT
 )
+
+from nGPT_pytorch.nTransformer import nTransformer

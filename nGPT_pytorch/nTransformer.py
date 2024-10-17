@@ -82,28 +82,6 @@ class Scale(Module):
     def forward(self):
         return self.scale * self.forward_scale
 
-# residual slerp update with learned scale
-
-class Residual(Module):
-    def __init__(
-        self,
-        fn: Module,
-        dim: int,
-        init: float,
-        scale: float
-    ):
-        super().__init__()
-        self.fn = fn
-        self.branch_scale = Scale(dim, init, default(scale, dim ** -0.5))
-
-    def forward(self, x, **kwargs):
-        residual = x
-
-        branch_out = l2norm(self.fn(x, **kwargs))
-        out = l2norm(residual.lerp(branch_out, self.branch_scale()))
-
-        return out
-
 # for use with parametrize
 
 class L2Norm(Module):
@@ -302,13 +280,12 @@ class FeedForward(Module):
 
 # classes
 
-class nGPT(Module):
+class nTransformer(Module):
     def __init__(
         self,
         *,
         dim,
         depth,
-        num_tokens = None,
         dim_head = 64,
         heads = 8,
         attn_norm_qk = True,  # they say the query/key normalization is optional
@@ -340,19 +317,10 @@ class nGPT(Module):
         norm_eps = 0. # greater than 0 allows the norm to be around (1. - norm_eps) to (1. + norm_eps)
     ):
         super().__init__()
-        NormLinear_ = partial(NormLinear, parametrize = not manual_norm_weights, norm_eps = norm_eps, groups = num_hyperspheres)
-        self.l2norm = partial(l2norm, norm_eps = norm_eps, groups = num_hyperspheres)
 
         self.dim = dim
         self.causal = causal
-        alpha_init = default(alpha_init, 1. / depth)
-
-        # allow for plain stack of attention and feedforward, for trying to use in a different setting
-
-        only_transformer = not exists(num_tokens)
-        self.only_transformer = only_transformer
-
-        self.token_embed = NormLinear_(dim, num_tokens) if not only_transformer else None
+        alpha_init = default(alpha_init, 1. / depth)        
 
         self.layers = ModuleList([])
 
@@ -410,27 +378,19 @@ class nGPT(Module):
                 num_hyperspheres = num_hyperspheres
             )
 
-            attn_with_residual = Residual(
-                attn,
+            attn_interp_factor = Scale(
                 dim,
                 default(alpha_attn_init_, alpha_init),
                 default(alpha_attn_scale_, dim ** -0.5)
             )
 
-            ff_with_residual = Residual(
-                ff,
+            ff_interp_factor = Scale(
                 dim,
                 default(alpha_ff_init_, alpha_init),
                 default(alpha_ff_scale_, dim ** -0.5)
             )
 
-            self.layers.append(ModuleList([attn_with_residual, ff_with_residual]))
-
-        self.to_logits = NormLinear_(dim, num_tokens) if (not tied_embedding or only_transformer) or not exists(num_tokens) else None
-
-        self.logit_scale = Scale(num_tokens, s_logit_init, default(s_logit_scale, dim ** -0.5))
-
-        self.ignore_index = ce_ignore_index
+            self.layers.append(ModuleList([attn, ff, attn_interp_factor, ff_interp_factor]))
 
     @torch.no_grad()
     def norm_weights_(self):
@@ -442,37 +402,30 @@ class nGPT(Module):
 
     def forward(
         self,
-        ids,
+        tokens,
         mask = None,
-        return_loss = False
     ):
-        token_embed = self.token_embed.weight
 
-        if return_loss:
-            assert self.causal
-            ids, labels = ids[:, :-1], ids[:, 1:]
+        for attn, ff, attn_alpha, ff_alpha in self.layers:
 
-        tokens = token_embed[ids]
+            attn_out = l2norm(attn(tokens, mask = mask))
+            tokens = l2norm(tokens.lerp(attn_out, attn_alpha()))
 
-        for attn, ff in self.layers:
-            tokens = attn(tokens)
-            tokens = ff(tokens)
+            ff_out = l2norm(ff(tokens))
+            tokens = l2norm(tokens.lerp(ff_out, ff_alpha()))
 
-        if exists(self.to_logits):
-            logits = self.to_logits(tokens)
-        else:
-            # tied embeddings
-            logits = einsum(tokens, token_embed, 'b n d, c d -> b n c')
+        return tokens
 
-        logits = logits * self.logit_scale()
+# self contained file
 
-        if not return_loss:
-            return logits
+if __name__ == '__main__':
 
-        loss = F.cross_entropy(
-            rearrange(logits, 'b n c -> b c n'),
-            labels,
-            ignore_index = self.ignore_index
-        )
+    transformer = nTransformer(
+        dim = 512,
+        depth = 4
+    )
 
-        return loss
+    x = torch.randn(1, 1024, 512)
+
+    embed = transformer(x)
+    assert x.shape == embed.shape
