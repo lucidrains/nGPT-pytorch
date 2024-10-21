@@ -161,7 +161,7 @@ for i in tqdm.tqdm(range(NUM_BATCHES), mininterval = 10.0, desc = "training"):
         inp = random.choice(val_dataset)[:PRIME_LENGTH]
 
         prime = decode_tokens(inp)
-        print(f"%s \n\n %s", (prime, "*" * 100))
+        print(f"{prime} \n\n {'*' * 100}")
 
         prompt = inp[None, ...]
 
@@ -169,4 +169,4 @@ for i in tqdm.tqdm(range(NUM_BATCHES), mininterval = 10.0, desc = "training"):
 
         base_decode_output = decode_tokens(sampled[0])
 
-        print("\n\n", base_decode_output, "\n")
+        print(f"\n\n{base_decode_output}\n")

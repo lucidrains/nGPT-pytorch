@@ -450,7 +450,7 @@ class nGPT(Module):
         tokens = token_embed[ids]
 
         for attn, ff in self.layers:
-            tokens = attn(tokens)
+            tokens = attn(tokens, mask = mask)
             tokens = ff(tokens)
 
         if exists(self.to_logits):
