@@ -3,6 +3,7 @@ import gzip
 import random
 import tqdm
 import numpy as np
+from contextlib import nullcontext
 
 import torch
 from torch.optim import Adam
@@ -23,8 +24,10 @@ PRIME_LENGTH = 128
 GENERATE_EVERY = 500
 GENERATE_LENGTH = 512
 SEQ_LEN = 512
+USE_AMP = False
 
 device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
+model_forward_context = torch.autocast(device_type='cuda',  dtype = torch.float16) if USE_AMP and torch.cuda.is_available() else nullcontext()
 
 # helpers
 
@@ -136,7 +139,8 @@ for i in tqdm.tqdm(range(NUM_BATCHES), mininterval = 10.0, desc = "training"):
     for _ in range(GRAD_ACCUM_EVERY):
         data = next(train_loader)
 
-        loss = model(data, return_loss = True)
+        with model_forward_context:
+            loss = model(data, return_loss = True)
 
         (loss / GRAD_ACCUM_EVERY).backward()
 
