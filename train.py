@@ -11,7 +11,7 @@ from torch import Tensor
 from torch.utils.data import DataLoader, Dataset
 import torch.nn.utils.parametrize as parametrize
 
-from nGPT_pytorch import nGPT
+from nGPT_pytorch.nGPTExperimental import nGPT
 
 # constants
 

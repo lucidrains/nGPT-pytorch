@@ -98,11 +98,20 @@ class Residual(Module):
     def forward(self, x, **kwargs):
         residual = x
 
-        branch_out = l2norm(self.fn(x, **kwargs))
+        branch_out = self.fn(x, **kwargs)
 
+        is_tuple_output = isinstance(branch_out, tuple)
+
+        if is_tuple_output:
+            branch_out, *rest = branch_out
+
+        branch_out = l2norm(branch_out)
         not_ortho = einsum(branch_out, residual, '... d, ... d -> ...').square().mean()
 
         out = l2norm(residual.lerp(branch_out, self.branch_scale()))
+
+        if is_tuple_output:
+            out = (out, *rest)
 
         return out, not_ortho
 
@@ -222,13 +231,19 @@ class Attention(Module):
     def forward(
         self,
         x,
-        mask = None
+        mask = None,
+        value_residual = None
     ):
         q, k, v = self.to_q(x), self.to_k(x), self.to_v(x)
 
         # split heads
 
         q, k, v = map(self.split_heads, (q, k, v))
+
+        # value residual - https://arxiv.org/abs/2410.17897
+
+        if exists(value_residual):
+            v = v + value_residual
 
         # maybe query key norm
 
@@ -261,7 +276,7 @@ class Attention(Module):
             )
 
         out = self.merge_heads(out)
-        return self.to_out(out)
+        return self.to_out(out), v
 
 # feedforward
 
@@ -460,11 +475,15 @@ class nGPT(Module):
 
         tokens = token_embed[ids]
 
+        value_residual = None
+
         aux_loss = 0.
 
         for attn, ff in self.layers:
-            tokens, ortho_loss = attn(tokens, mask = mask)
+            (tokens, values), ortho_loss = attn(tokens, mask = mask, value_residual = value_residual)
             aux_loss = aux_loss + ortho_loss
+
+            value_residual = default(value_residual, values)
 
             tokens, ortho_loss = ff(tokens)
             aux_loss = aux_loss + ortho_loss
