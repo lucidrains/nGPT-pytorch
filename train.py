@@ -25,9 +25,13 @@ PRIME_LENGTH = 128
 GENERATE_EVERY = 500
 GENERATE_LENGTH = 512
 SEQ_LEN = 512
+
 USE_AMP = True
+USE_PARAMETRIZE = True # whether to manually update weights after each optimizer step
 
 device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
+
+assert not (USE_AMP and not torch.cuda.is_available())
 
 # helpers
 
@@ -94,8 +98,8 @@ model = nGPT(
     num_tokens = 256,
     dim = 512,
     depth = 8,
-    manual_norm_weights = True,
-    tied_embedding = True
+    tied_embedding = True,
+    manual_norm_weights = not USE_PARAMETRIZE
 ).to(device)
 
 scaler = GradScaler(enabled = USE_AMP)
@@ -153,7 +157,8 @@ for i in tqdm.tqdm(range(NUM_BATCHES), mininterval = 10.0, desc = "training"):
 
     optim.zero_grad()
 
-    model.norm_weights_()
+    if not USE_PARAMETRIZE:
+        model.norm_weights_()
 
     if i % VALIDATE_EVERY == 0:
         model.eval()
