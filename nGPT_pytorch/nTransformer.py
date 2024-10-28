@@ -44,15 +44,15 @@ def l2norm(
     eps = None,
     groups = 1
 ):
-    eps = default(eps, 1e-5 if t.dtype == torch.float16 else 1e-10)
 
     if groups > 1:
         t = t.chunk(groups, dim = dim)
         t = torch.stack(t)
 
     if norm_eps == 0.:
-        out = F.normalize(t, dim = dim, p = 2, eps = eps)
+        out = F.normalize(t, dim = dim, p = 2)
     else:
+        eps = default(eps, 1e-5 if t.dtype == torch.float16 else 1e-10)
         norm = t.norm(dim = dim, keepdim = True)
         target_norm = norm.detach().clamp(min = 1. - norm_eps, max = 1. + norm_eps)
         divisor = norm / target_norm
