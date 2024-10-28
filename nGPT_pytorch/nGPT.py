@@ -98,8 +98,18 @@ class Residual(Module):
     def forward(self, x, **kwargs):
         residual = x
 
-        branch_out = l2norm(self.fn(x, **kwargs))
-        out = l2norm(residual.lerp(branch_out, self.branch_scale()))
+        out = self.fn(x, **kwargs)
+
+        tuple_output = isinstance(out, tuple)
+
+        if tuple_output:
+            out, *rest = out
+
+        out = l2norm(out)
+        out = l2norm(residual.lerp(out, self.branch_scale()))
+
+        if tuple_output:
+            out = (out, *rest)
 
         return out
 
@@ -216,7 +226,9 @@ class Attention(Module):
         self,
         x,
         mask = None,
-        rotary_embed: Module | None = None
+        rotary_embed: Module | None = None,
+        value_residual = None,
+        return_values = False
     ):
         q, k, v = self.to_q(x), self.to_k(x), self.to_v(x)
 
@@ -245,6 +257,11 @@ class Attention(Module):
         if exists(mask):
             mask = rearrange(mask, 'b j -> b 1 1 j')
 
+        # maybe value residual, from resformer paper
+
+        if exists(value_residual):
+            v = v + value_residual
+
         # scale is sqrt(dk)
 
         with self.sdpa_context_manager():
@@ -256,7 +273,12 @@ class Attention(Module):
             )
 
         out = self.merge_heads(out)
-        return self.to_out(out)
+        out = self.to_out(out)
+
+        if not return_values:
+            return out
+
+        return out, v
 
 # feedforward
 
@@ -315,6 +337,7 @@ class nGPT(Module):
         tied_embedding = False,
         num_hyperspheres = 1,
         causal = True,
+        add_value_residual = True,
         # below are all the scale related hyperparameters, for controlling effective relative learning rates throughout the network
         alpha_init: float | None = None,  # this would set the alpha init for all residuals, but would be overridden by alpha_attn_init and alpha_ff_init if they are specified
         s_logit_init: float  = 1.,
@@ -343,6 +366,8 @@ class nGPT(Module):
         self.dim = dim
         self.causal = causal
         alpha_init = default(alpha_init, 1. / depth)
+
+        self.add_value_residual = add_value_residual # https://arxiv.org/abs/2410.17897v1
 
         self.token_embed = NormLinear_(dim, num_tokens)
 
@@ -448,8 +473,13 @@ class nGPT(Module):
 
         tokens = token_embed[ids]
 
+        first_values = None
+
         for attn, ff in self.layers:
-            tokens = attn(tokens, mask = mask, rotary_embed = rotary_embed)
+            tokens, values = attn(tokens, mask = mask, rotary_embed = rotary_embed, return_values = True, value_residual = first_values if self.add_value_residual else None)
+
+            first_values = default(first_values, values)
+
             tokens = ff(tokens)
 
         if exists(self.to_logits):
