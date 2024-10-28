@@ -8,10 +8,11 @@ from contextlib import nullcontext
 import torch
 from torch.optim import Adam
 from torch import Tensor
+from torch.amp import GradScaler
 from torch.utils.data import DataLoader, Dataset
 import torch.nn.utils.parametrize as parametrize
 
-from nGPT_pytorch.nGPTExperimental import nGPT
+from nGPT_pytorch import nGPT
 
 # constants
 
@@ -24,10 +25,9 @@ PRIME_LENGTH = 128
 GENERATE_EVERY = 500
 GENERATE_LENGTH = 512
 SEQ_LEN = 512
-USE_AMP = False
+USE_AMP = True
 
 device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
-model_forward_context = torch.autocast(device_type='cuda',  dtype = torch.float16) if USE_AMP and torch.cuda.is_available() else nullcontext()
 
 # helpers
 
@@ -98,6 +98,8 @@ model = nGPT(
     tied_embedding = True
 ).to(device)
 
+scaler = GradScaler(enabled = USE_AMP)
+
 # prepare enwik8 data
 
 with gzip.open("./data/enwik8.gz") as file:
@@ -139,14 +141,16 @@ for i in tqdm.tqdm(range(NUM_BATCHES), mininterval = 10.0, desc = "training"):
     for _ in range(GRAD_ACCUM_EVERY):
         data = next(train_loader)
 
-        with model_forward_context:
+        with torch.autocast(device_type = 'cuda',  dtype = torch.float16, enabled = USE_AMP):
             loss = model(data, return_loss = True)
 
-        (loss / GRAD_ACCUM_EVERY).backward()
+        scaler.scale(loss / GRAD_ACCUM_EVERY).backward()
 
     print(f"training loss: {loss.item():.3f}")
 
-    optim.step()
+    scaler.step(optim)
+    scaler.update()
+
     optim.zero_grad()
 
     model.norm_weights_()
