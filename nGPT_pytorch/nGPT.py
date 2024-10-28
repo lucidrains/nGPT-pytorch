@@ -201,10 +201,6 @@ class Attention(Module):
         sdpa_backends = [SDP_BACKEND_MAP[enable_str] for enable_str, enable in flash_kwargs.items() if enable]
         self.sdpa_context_manager = partial(torch.nn.attention.sdpa_kernel, sdpa_backends)
 
-        # rotary 
-
-        self.rotary_emb = RotaryEmbedding(dim_head)
-
         # qk rmsnorm + scale
 
         self.norm_qk = norm_qk
@@ -219,7 +215,8 @@ class Attention(Module):
     def forward(
         self,
         x,
-        mask = None
+        mask = None,
+        rotary_embed: Module | None = None
     ):
         q, k, v = self.to_q(x), self.to_k(x), self.to_v(x)
 
@@ -239,8 +236,9 @@ class Attention(Module):
 
         # rotary positions
 
-        q = self.rotary_emb.rotate_queries_or_keys(q)
-        k = self.rotary_emb.rotate_queries_or_keys(k)
+        if exists(rotary_embed):
+            q = rotary_embed.rotate_queries_or_keys(q)
+            k = rotary_embed.rotate_queries_or_keys(k)
 
         # for non-autoregressive masking
 
@@ -348,6 +346,8 @@ class nGPT(Module):
 
         self.token_embed = NormLinear_(dim, num_tokens)
 
+        self.rotary_embed = RotaryEmbedding(dim_head)
+
         self.layers = ModuleList([])
 
         scale_hparams = (
@@ -440,7 +440,7 @@ class nGPT(Module):
         mask = None,
         return_loss = False
     ):
-        token_embed = self.token_embed.weight
+        token_embed, rotary_embed = self.token_embed.weight, self.rotary_embed
 
         if return_loss:
             assert self.causal
@@ -449,7 +449,7 @@ class nGPT(Module):
         tokens = token_embed[ids]
 
         for attn, ff in self.layers:
-            tokens = attn(tokens, mask = mask)
+            tokens = attn(tokens, mask = mask, rotary_embed = rotary_embed)
             tokens = ff(tokens)
 
         if exists(self.to_logits):
