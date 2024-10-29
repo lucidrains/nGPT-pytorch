@@ -100,6 +100,7 @@ model = nGPT(
     depth = 8,
     tied_embedding = True,
     add_value_residual = True,
+    attn_norm_qk = False,
     manual_norm_weights = not USE_PARAMETRIZE
 ).to(device)
 
