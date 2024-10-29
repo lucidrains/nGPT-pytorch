@@ -139,6 +139,11 @@ optim = Adam(model.parameters(), lr = LEARNING_RATE)
 train_loader = cycle(train_loader)
 val_loader = cycle(val_loader)
 
+# if not using parametrize, register normalizing on optimizer step
+
+if not USE_PARAMETRIZE:
+    model.register_step_post_hook(optim)
+
 # training
 
 for i in tqdm.tqdm(range(NUM_BATCHES), mininterval = 10.0, desc = "training"):
@@ -158,9 +163,6 @@ for i in tqdm.tqdm(range(NUM_BATCHES), mininterval = 10.0, desc = "training"):
     scaler.update()
 
     optim.zero_grad()
-
-    if not USE_PARAMETRIZE:
-        model.norm_weights_()
 
     if i % VALIDATE_EVERY == 0:
         model.eval()

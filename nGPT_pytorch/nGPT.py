@@ -459,6 +459,14 @@ class nGPT(Module):
 
             module.norm_weights_()
 
+    def register_step_post_hook(self, optimizer):
+        assert hasattr(optimizer, 'register_step_post_hook')
+
+        def hook(*_):
+            self.norm_weights_()
+
+        return optimizer.register_step_post_hook(hook)
+
     def forward(
         self,
         ids,
