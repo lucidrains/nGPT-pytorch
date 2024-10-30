@@ -220,8 +220,8 @@ class Attention(Module):
         # qk rmsnorm + scale
 
         self.norm_qk = norm_qk
-        self.q_scale = Scale(dim, s_qk_init, default(s_qk_scale, dim ** -0.5))
-        self.k_scale = Scale(dim, s_qk_init, default(s_qk_scale, dim ** -0.5))
+        self.q_scale = Scale(dim_inner, s_qk_init, default(s_qk_scale, dim ** -0.5))
+        self.k_scale = Scale(dim_inner, s_qk_init, default(s_qk_scale, dim ** -0.5))
 
         self.split_heads = Rearrange('b n (h d) -> b h n d', h = heads)
         self.merge_heads = Rearrange('b h n d -> b n (h d)')

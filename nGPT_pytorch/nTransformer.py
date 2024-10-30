@@ -188,8 +188,8 @@ class Attention(Module):
         # qk rmsnorm + scale
 
         self.norm_qk = norm_qk
-        self.q_scale = Scale(dim, s_qk_init, default(s_qk_scale, dim ** -0.5))
-        self.k_scale = Scale(dim, s_qk_init, default(s_qk_scale, dim ** -0.5))
+        self.q_scale = Scale(dim_inner, s_qk_init, default(s_qk_scale, dim ** -0.5))
+        self.k_scale = Scale(dim_inner, s_qk_init, default(s_qk_scale, dim ** -0.5))
 
         self.split_heads = Rearrange('b n (h d) -> b h n d', h = heads)
         self.merge_heads = Rearrange('b h n d -> b n (h d)')
@@ -430,11 +430,11 @@ class nTransformer(Module):
 if __name__ == '__main__':
 
     transformer = nTransformer(
-        dim = 512,
+        dim = 256,
         depth = 4
     )
 
-    x = torch.randn(1, 1024, 512)
+    x = torch.randn(2, 1024, 256)
 
     embed = transformer(x, norm_input = True)
     assert x.shape == embed.shape
