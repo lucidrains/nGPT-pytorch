@@ -89,7 +89,7 @@ class Residual(Module):
         fn: Module,
         dim: int,
         init: float,
-        scale: float
+        scale: float | None = None
     ):
         super().__init__()
         self.fn = fn
