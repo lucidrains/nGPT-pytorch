@@ -263,7 +263,7 @@ class Attention(Module):
         # maybe value residual, from resformer paper
 
         if exists(value_residual):
-            v = v + value_residual
+            v = 0.5 * (v + value_residual)
 
         # scale is sqrt(dk)
 

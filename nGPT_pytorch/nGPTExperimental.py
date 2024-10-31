@@ -243,7 +243,7 @@ class Attention(Module):
         # value residual - https://arxiv.org/abs/2410.17897
 
         if exists(value_residual):
-            v = v + value_residual
+            v = 0.5 * (v + value_residual)
 
         # maybe query key norm
 
