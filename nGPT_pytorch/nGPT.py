@@ -89,11 +89,14 @@ class Residual(Module):
         fn: Module,
         dim: int,
         init: float,
-        scale: float | None = None
+        scale: float | None = None,
+        groups = 1,
+        norm_eps = 0.
     ):
         super().__init__()
         self.fn = fn
         self.branch_scale = Scale(dim, init, default(scale, dim ** -0.5))
+        self.l2norm = L2Norm(dim = -1, norm_eps = norm_eps, groups = groups)
 
     def forward(self, x, **kwargs):
         residual = x
@@ -105,8 +108,8 @@ class Residual(Module):
         if tuple_output:
             out, *rest = out
 
-        out = l2norm(out)
-        out = l2norm(residual.lerp(out, self.branch_scale()))
+        out = self.l2norm(out)
+        out = self.l2norm(residual.lerp(out, self.branch_scale()))
 
         if tuple_output:
             out = (out, *rest)
