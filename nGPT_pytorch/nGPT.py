@@ -217,8 +217,7 @@ class Attention(Module):
         # qk rmsnorm + scale
 
         self.norm_qk = norm_qk
-        self.q_scale = Scale(dim_inner, s_qk_init, default(s_qk_scale, dim ** -0.5))
-        self.k_scale = Scale(dim_inner, s_qk_init, default(s_qk_scale, dim ** -0.5))
+        self.qk_scale = Scale(dim_inner, s_qk_init, default(s_qk_scale, dim ** -1))
 
         self.split_heads = Rearrange('b n (h d) -> b h n d', h = heads)
         self.merge_heads = Rearrange('b h n d -> b n (h d)')
@@ -244,6 +243,12 @@ class Attention(Module):
         if exists(value_residual):
             v = 0.5 * (v + value_residual)
 
+        # rotary positions
+
+        if exists(rotary_embed):
+            q = rotary_embed.rotate_queries_or_keys(q)
+            k = rotary_embed.rotate_queries_or_keys(k)
+
         # maybe query key norm
 
         if self.norm_qk:
@@ -251,14 +256,7 @@ class Attention(Module):
 
         # scaling queries and keys - this would line up with the popular use of qk rmsnorm from google deepmind and now black forest labs - will use multihead rmsnorm
 
-        q = q * rearrange(self.q_scale(), '(h d) -> h 1 d', h = self.heads)
-        k = k * rearrange(self.k_scale(), '(h d) -> h 1 d', h = self.heads)
-
-        # rotary positions
-
-        if exists(rotary_embed):
-            q = rotary_embed.rotate_queries_or_keys(q)
-            k = rotary_embed.rotate_queries_or_keys(k)
+        q = q * rearrange(self.qk_scale(), '(h d) -> h 1 d', h = self.heads)
 
         # for non-autoregressive masking
 
