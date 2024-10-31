@@ -239,6 +239,11 @@ class Attention(Module):
 
         q, k, v = map(self.split_heads, (q, k, v))
 
+        # maybe value residual, from resformer paper
+
+        if exists(value_residual):
+            v = 0.5 * (v + value_residual)
+
         # maybe query key norm
 
         if self.norm_qk:
@@ -259,11 +264,6 @@ class Attention(Module):
 
         if exists(mask):
             mask = rearrange(mask, 'b j -> b 1 1 j')
-
-        # maybe value residual, from resformer paper
-
-        if exists(value_residual):
-            v = 0.5 * (v + value_residual)
 
         # scale is sqrt(dk)
 
