@@ -264,6 +264,8 @@ class Attention(Module):
         # for non-autoregressive masking
 
         if exists(mask):
+            row_all_masked_out = ~mask.any(dim = -1)
+
             mask = rearrange(mask, 'b j -> b 1 1 j')
 
             if exists(self.mask_value):
@@ -281,6 +283,9 @@ class Attention(Module):
 
         out = self.merge_heads(out)
         out = self.to_out(out)
+
+        if exists(mask) and row_all_masked_out.any():
+            out = einx.where('b n, b n d, -> b n d', ~row_all_masked_out, out, 0.)
 
         if not return_values:
             return out
