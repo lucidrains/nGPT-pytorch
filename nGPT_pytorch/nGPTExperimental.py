@@ -267,7 +267,7 @@ class Attention(Module):
             mask = rearrange(mask, 'b j -> b 1 1 j')
 
             if exists(self.mask_value):
-                mask = mask * self.mask_value
+                mask = ~mask * self.mask_value
 
         # scale is sqrt(dk)
 
