@@ -226,9 +226,6 @@ class Attention(Module):
         if exists(mask):
             mask = rearrange(mask, 'b j -> b 1 1 j')
 
-            # fix an issue with sdpa + bool mask
-            mask = mask.float() * -torch.finfo(q.dtype).max
-
         # scale is sqrt(dk)
 
         with self.sdpa_context_manager():
