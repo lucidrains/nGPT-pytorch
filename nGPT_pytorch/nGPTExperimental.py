@@ -214,8 +214,6 @@ class Attention(Module):
         sdpa_backends = [SDP_BACKEND_MAP[enable_str] for enable_str, enable in flash_kwargs.items() if enable]
         self.sdpa_context_manager = partial(torch.nn.attention.sdpa_kernel, sdpa_backends)
 
-        self.mask_value = mask_value
-
         # rotary 
 
         self.rotary_emb = RotaryEmbedding(dim_head)
@@ -265,9 +263,6 @@ class Attention(Module):
 
         if exists(mask):
             mask = rearrange(mask, 'b j -> b 1 1 j')
-
-            if exists(self.mask_value):
-                mask = ~mask * self.mask_value
 
         # scale is sqrt(dk)
 
@@ -341,7 +336,6 @@ class nGPT(Module):
         tied_embedding = False,
         num_hyperspheres = 1,
         causal = True,
-        attn_mask_value: float | None = None,
         # below are all the scale related hyperparameters, for controlling effective relative learning rates throughout the network
         alpha_init: float | None = None,  # this would set the alpha init for all residuals, but would be overridden by alpha_attn_init and alpha_ff_init if they are specified
         s_logit_init: float  = 1.,
@@ -415,7 +409,6 @@ class nGPT(Module):
                 flash_kwargs = attn_flash_kwargs,
                 norm_eps = norm_eps,
                 num_hyperspheres = num_hyperspheres,
-                mask_value = attn_mask_value
             )
 
             ff = FeedForward(

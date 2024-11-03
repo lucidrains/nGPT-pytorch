@@ -192,7 +192,6 @@ class Attention(Module):
         ),
         norm_eps = 0.,
         num_hyperspheres = 1,
-        mask_value: float | None = None
     ):
         super().__init__()
         self.heads = heads
@@ -214,8 +213,6 @@ class Attention(Module):
 
         sdpa_backends = [SDP_BACKEND_MAP[enable_str] for enable_str, enable in flash_kwargs.items() if enable]
         self.sdpa_context_manager = partial(torch.nn.attention.sdpa_kernel, sdpa_backends)
-
-        self.attn_mask_value = attn_mask_value
 
         # qk rmsnorm + scale
 
@@ -268,9 +265,6 @@ class Attention(Module):
 
             mask = rearrange(mask, 'b j -> b 1 1 j')
 
-            if exists(self.mask_value):
-                mask = ~mask * self.mask_value
-
         # scale is sqrt(dk)
 
         with self.sdpa_context_manager():
@@ -285,7 +279,7 @@ class Attention(Module):
         out = self.to_out(out)
 
         if exists(mask) and row_all_masked_out.any():
-            out = einx.where('b n, b n d, -> b n d', ~row_all_masked_out, out, 0.)
+            out = out.masked_fill(row_all_masked_out[:, None, None], 0.)
 
         if not return_values:
             return out
@@ -350,7 +344,6 @@ class nGPT(Module):
         num_hyperspheres = 1,
         causal = True,
         add_value_residual = True,
-        attn_mask_value: float | None = None, # address some issue with sdpa
         # below are all the scale related hyperparameters, for controlling effective relative learning rates throughout the network
         alpha_init: float | None = None,  # this would set the alpha init for all residuals, but would be overridden by alpha_attn_init and alpha_ff_init if they are specified
         s_logit_init: float  = 1.,
@@ -426,7 +419,6 @@ class nGPT(Module):
                 s_qk_init = s_qk_init_,
                 s_qk_scale = s_qk_scale_,
                 flash_kwargs = attn_flash_kwargs,
-                mask_value = attn_mask_value,
                 norm_eps = norm_eps,
                 num_hyperspheres = num_hyperspheres
             )
