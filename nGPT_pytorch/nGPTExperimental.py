@@ -187,7 +187,8 @@ class Attention(Module):
         flash_kwargs: dict = dict(
             enable_flash = True,
             enable_math = True,
-            enable_mem_efficient = True
+            enable_mem_efficient = True,
+            enable_cudnn = True
         ),
         norm_eps = 0.,
         num_hyperspheres = 1,
