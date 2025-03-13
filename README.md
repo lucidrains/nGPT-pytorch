@@ -8,6 +8,8 @@ This type of network should also be studied in the context of continual learning
 
 Adaptation to vision transformers is [here](https://github.com/lucidrains/vit-pytorch/blob/main/vit_pytorch/normalized_vit.py)
 
+Update: The normalized feedforward was successfully applied for improving UTD for off-policy reinforcement learning [in a new paper](https://dojeon-ai.github.io/SimbaV2/)
+
 ## Install
 
 ```bash
