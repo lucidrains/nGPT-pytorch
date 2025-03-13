@@ -307,6 +307,8 @@ class FeedForward(Module):
         NormLinear_ = partial(NormLinear, parametrize = not manual_norm_weights, norm_eps = norm_eps, groups = num_hyperspheres)
 
         self.dim = dim
+        self.expand_factor = expand_factor
+
         dim_inner = int(dim * expand_factor * 2 / 3)
 
         self.to_hidden = NormLinear_(dim, dim_inner)
