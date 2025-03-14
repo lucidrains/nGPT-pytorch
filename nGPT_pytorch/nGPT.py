@@ -195,6 +195,9 @@ class Attention(Module):
         num_hyperspheres = 1,
     ):
         super().__init__()
+        self.dim = dim
+        self.dim_head = dim_head
+
         self.heads = heads
         self.causal = causal
 
@@ -224,6 +227,9 @@ class Attention(Module):
         self.merge_heads = Rearrange('b h n d -> b n (h d)')
 
         self.to_out = NormLinear_(dim_inner, dim, norm_dim_in = False)
+
+    def __eq__(x, y):
+        return x.dim == y.dim and x.heads == y.heads and x.dim_head == y.dim_head
 
     def forward(
         self,
@@ -320,6 +326,9 @@ class FeedForward(Module):
         self.gate_scale = Scale(dim_inner, s_gate_init, s_gate_scale)
 
         self.to_out = NormLinear_(dim_inner, dim, norm_dim_in = False)
+
+    def __eq__(x, y):
+        return x.dim == y.dim and x.expand_factor == y.expand_factor
 
     def forward(self, x):
         hidden, gate = self.to_hidden(x), self.to_gate(x)
