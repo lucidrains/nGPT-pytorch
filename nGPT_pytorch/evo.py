@@ -1,21 +1,58 @@
+from __future__ import annotations
 from copy import deepcopy
 
 import torch
-from torch import cat, randperm
+from torch import cat, randperm, Tensor
 
 from einops import rearrange
-from nGPT_pytorch.nGPT import FeedForward, Attention
+from nGPT_pytorch.nGPT import NormLinear, FeedForward, Attention
+
+# helper functions
+
+def exists(v):
+    return v is not None
+
+# cross over normlinear
+
+@torch.no_grad()
+def cross_over_linear(
+    parent1: NormLinear,
+    parent2: NormLinear,
+    parent1_indices: Tensor,
+    parent2_indices: Tensor,
+    child: NormLinear | None = None,
+    dim: int = 0
+) -> NormLinear:
+
+    if not exists(child):
+        child = deepcopy(parent1)
+
+    assert dim in {0, 1}
+    assert parent1 == parent2
+
+    w1 = parent1.weight
+    w2 = parent2.weight
+
+    if dim == 0:
+        crossover_weight = cat((w1[parent1_indices], w2[parent2_indices]), dim = 0)
+    else:
+        crossover_weight = cat((w1[:, parent1_indices], w2[:, parent2_indices]), dim = 1)
+
+    child.weight.copy_(crossover_weight)
+    return child
 
 # breeding feedforwards
 
 @torch.no_grad()
 def cross_over_feedforward(
     parent1: FeedForward,
-    parent2: FeedForward
+    parent2: FeedForward,
+    child: FeedForward | None = None
 ) -> FeedForward:
     assert parent1 == parent2
 
-    child = deepcopy(parent1)
+    if not exists(child):
+        child = deepcopy(parent1)
 
     dim_inner = parent1.dim_inner
 
@@ -60,7 +97,8 @@ def cross_over_feedforward(
 @torch.no_grad()
 def cross_over_attention(
     parent1: Attention,
-    parent2: Attention
+    parent2: Attention,
+    child: Attention | None = None
 ) -> Attention:
 
     assert parent1 == parent2
@@ -68,7 +106,8 @@ def cross_over_attention(
     heads = parent1.heads
     assert heads > 1
 
-    child = deepcopy(parent1)
+    if not exists(child):
+        child = deepcopy(parent1)
 
     split_heads_first_dim = lambda t: rearrange(t, '(h d) ... -> h d ...', h = heads)
     split_heads_last_dim = lambda t: rearrange(t, 'e (h d) -> e h d', h = heads)

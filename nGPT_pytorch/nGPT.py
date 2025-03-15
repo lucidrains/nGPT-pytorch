@@ -139,6 +139,9 @@ class NormLinear(Module):
         groups = 1
     ):
         super().__init__()
+        self.dim = dim
+        self.dim_out = dim_out
+
         self.linear = nn.Linear(dim, dim_out, bias = False)
 
         self.scale = groups ** -1
@@ -153,6 +156,13 @@ class NormLinear(Module):
             )
 
         self.norm_weights_()
+
+    def __eq__(self, x):
+        return (
+            isinstance(x, NormLinear) and
+            self.dim == x.dim and
+            self.dim_out == x.dim_out
+        )
 
     @torch.no_grad()
     def norm_weights_(self):
