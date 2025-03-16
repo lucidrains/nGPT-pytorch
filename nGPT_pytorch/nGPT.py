@@ -75,8 +75,15 @@ class Scale(Module):
         scale = 1.
     ):
         super().__init__()
+        self.dim = dim
         self.scale = nn.Parameter(torch.ones(dim) * scale)
         self.forward_scale = init / scale
+
+    def __eq__(self, other):
+        return (
+            isinstance(other, Scale) and
+            self.dim == other.dim
+        )
 
     def forward(self):
         return self.scale * self.forward_scale
