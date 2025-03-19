@@ -5,7 +5,7 @@ import torch
 from torch import cat, randperm, Tensor
 
 from einops import rearrange
-from nGPT_pytorch.nGPT import NormLinear, Scale, FeedForward, Attention
+from nGPT_pytorch.nGPT import NormLinear, Scale, FeedForward, Attention, nGPT
 
 # helper functions
 
@@ -126,5 +126,36 @@ def cross_over_attention(
     cross_over_linear(parent1.to_out, parent2.to_out, parent1_indices, parent2_indices, child = child.to_out, dim = 1)
 
     cross_over_scale(parent1.qk_scale, parent2.qk_scale, parent1_indices, parent2_indices, child = child.qk_scale)
+
+    return child
+
+# breed normalized transformers
+
+@torch.no_grad()
+def cross_over_ngpt(
+    ngpt1: nGPT,
+    ngpt2: nGPT,
+    child: nGPT | None = None
+) -> nGPT:
+
+    assert ngpt1 == ngpt2
+
+    if not exists(child):
+        child = deepcopy(ngpt1)
+
+    num_tokens = ngpt1.num_tokens
+    midpoint = num_tokens // 2
+    rand_indices = randperm(num_tokens)
+    parent1_indices, parent2_indices = rand_indices[:midpoint], rand_indices[midpoint:]
+
+    cross_over_linear(ngpt1.token_embed, ngpt2.token_embed, parent1_indices, parent2_indices, child = child.token_embed)
+
+    for (attn1, ff1), (attn2, ff2), (child_attn, child_ff) in zip(ngpt1.layers, ngpt2.layers, child.layers):
+        cross_over_attention(attn1.fn, attn2.fn, child = child_attn.fn)
+        cross_over_feedforward(ff1.fn, ff2.fn, child = child_ff.fn)
+
+    cross_over_scale(ngpt1.logit_scale, ngpt2.logit_scale, parent1_indices, parent2_indices, child = child.logit_scale)
+
+    cross_over_linear(ngpt1.to_logits, ngpt2.to_logits, parent1_indices, parent2_indices, child = child.to_logits)
 
     return child

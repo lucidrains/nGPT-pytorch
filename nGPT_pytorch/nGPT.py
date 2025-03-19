@@ -400,7 +400,13 @@ class nGPT(Module):
         NormLinear_ = partial(NormLinear, parametrize = not manual_norm_weights, norm_eps = norm_eps, groups = num_hyperspheres)
         self.l2norm = partial(l2norm, norm_eps = norm_eps, groups = num_hyperspheres)
 
+        self.num_tokens = num_tokens
         self.dim = dim
+        self.heads = heads
+        self.dim_head = dim_head
+        self.depth = depth
+        self.ff_expand_factor = ff_expand_factor
+
         self.causal = causal
         alpha_init = default(alpha_init, 1. / depth)
 
@@ -487,6 +493,17 @@ class nGPT(Module):
         self.logit_scale = Scale(num_tokens, s_logit_init, default(s_logit_scale, dim ** -0.5))
 
         self.ignore_index = ce_ignore_index
+
+    def __eq__(self, other):
+        return (
+            isinstance(other, nGPT) and
+            self.num_tokens == other.num_tokens and 
+            self.dim == other.dim and
+            self.dim_head == other.dim_head and
+            self.depth == other.depth and
+            self.heads == other.heads and
+            self.ff_expand_factor == other.ff_expand_factor
+        )
 
     @torch.no_grad()
     def norm_weights_(self):
